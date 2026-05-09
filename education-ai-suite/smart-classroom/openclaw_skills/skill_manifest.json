@@ -1,0 +1,81 @@
+{
+  "name": "smart_classroom_audio_summary",
+  "version": "1.0.0",
+  "description": "Transcribe classroom audio and generate a Markdown summary using Smart Classroom. Invokes the existing Pipeline directly (no FastAPI server required).",
+  "entry_point": {
+    "module": "openclaw_skills.audio_summary",
+    "function": "run_audio_summary"
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "audio_file": {
+        "type": "string",
+        "description": "Path to an audio file accessible to Smart Classroom (e.g. /data/lecture.wav)."
+      },
+      "audio_filename": {
+        "type": "string",
+        "description": "Filename of audio already staged under the project storage directory (e.g. uploaded via /upload-audio)."
+      },
+      "session_id": {
+        "type": "string",
+        "description": "Optional existing Smart Classroom session id. A new one is created when omitted."
+      },
+      "source_type": {
+        "type": "string",
+        "enum": ["audio_file"],
+        "default": "audio_file",
+        "description": "Audio source type. Only 'audio_file' is supported by the skill adapter."
+      },
+      "include_transcript": {
+        "type": "boolean",
+        "default": true,
+        "description": "When true, the full transcript text is included in the output."
+      }
+    },
+    "anyOf": [
+      {"required": ["audio_file"]},
+      {"required": ["audio_filename"]}
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "The Smart Classroom session id used for this run."
+      },
+      "summary_markdown": {
+        "type": "string",
+        "description": "Full generated classroom summary in Markdown format."
+      },
+      "transcript": {
+        "type": ["string", "null"],
+        "description": "Full transcript text (present when include_transcript=true)."
+      },
+      "transcription_events": {
+        "type": "array",
+        "description": "Raw chunk-level transcription events emitted by the pipeline.",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "required": ["session_id", "summary_markdown", "transcription_events"]
+  },
+  "error_codes": {
+    "AudioSummaryInputError": "Invalid or missing input (e.g. no audio provided, file not found, unsupported source_type).",
+    "RuntimeError": "Pipeline initialisation, transcription, or summarisation failure."
+  },
+  "runtime_requirements": {
+    "python": ">=3.9",
+    "working_directory": "education-ai-suite/smart-classroom",
+    "config_files": ["config.yaml", "runtime_config.yaml"],
+    "environment_notes": [
+      "ASR and LLM models must be available as configured in config.yaml.",
+      "ffmpeg must be installed and on PATH.",
+      "Set PYTHONPATH to include the smart-classroom root directory.",
+      "GPU or CPU device configuration is controlled by config.yaml."
+    ]
+  }
+}
