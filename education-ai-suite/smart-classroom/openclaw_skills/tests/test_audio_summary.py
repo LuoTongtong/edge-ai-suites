@@ -94,7 +94,7 @@ def _stub_dependencies():
 
     # pydantic BaseModel stub
     try:
-        import pydantic  # noqa: F401 – already installed, do nothing
+        import pydantic  # noqa: F401 -- already installed, do nothing
     except ImportError:
         pydantic_mod = _make_stub_module("pydantic")
 
@@ -357,10 +357,6 @@ class TestAudioSummarySkillPipelineFailure(unittest.TestCase):
             os.unlink(tmp_path)
 
     def test_raises_runtime_error_on_transcription_failure(self):
-        def bad_transcription():
-            raise RuntimeError("ASR crashed")
-            yield  # make it a generator
-
         mock_pipeline = MagicMock()
         mock_pipeline.run_transcription = MagicMock(side_effect=RuntimeError("ASR crashed"))
 
