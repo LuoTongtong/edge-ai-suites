@@ -1,0 +1,84 @@
+{
+  "name": "smart_classroom_mindmap",
+  "version": "1.0.0",
+  "description": "Generate a jsMind-compatible JSON mind map from a Smart Classroom summary. Can be chained directly after smart_classroom_audio_summary.",
+  "entrypoint": {
+    "type": "python",
+    "module": "openclaw_skills.mindmap.skill",
+    "function": "run"
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "Existing Smart Classroom session ID. When provided, the skill reads summary.md from the session directory. Pass the 'session_id' returned by smart_classroom_audio_summary."
+      },
+      "summary_markdown": {
+        "type": "string",
+        "description": "Markdown summary text to generate a mind map from. Pass the 'summary_markdown' returned by smart_classroom_audio_summary. When provided, the skill writes it to the session directory before calling the pipeline."
+      },
+      "language": {
+        "type": "string",
+        "enum": ["en", "zh"],
+        "default": "en",
+        "description": "Language of the summary, controls which system prompt is used."
+      },
+      "output_format": {
+        "type": "string",
+        "enum": ["jsmind_json", "raw"],
+        "default": "jsmind_json",
+        "description": "Requested output format. The LLM is always instructed to produce jsMind JSON; 'raw' disables JSON parsing of the result."
+      },
+      "include_raw": {
+        "type": "boolean",
+        "default": false,
+        "description": "When true, always include the raw LLM output string in the response even if JSON parsing succeeded."
+      }
+    },
+    "anyOf": [
+      {"required": ["session_id"]},
+      {"required": ["summary_markdown"]}
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "Smart Classroom session identifier used or created for this request."
+      },
+      "mindmap": {
+        "type": ["object", "null"],
+        "description": "Parsed jsMind JSON object with 'meta', 'format', and 'data' keys. null when JSON parsing failed.",
+        "properties": {
+          "meta": {"type": "object"},
+          "format": {"type": "string"},
+          "data": {"type": "object"}
+        }
+      },
+      "raw_mindmap": {
+        "type": "string",
+        "description": "Raw LLM output string. Always present when 'mindmap' is null or 'include_raw' is true."
+      },
+      "format": {
+        "type": "string",
+        "enum": ["jsmind_json", "raw"],
+        "description": "Actual format of the 'mindmap' field: 'jsmind_json' when parsing succeeded, 'raw' otherwise."
+      },
+      "source": {
+        "type": "string",
+        "enum": ["session_id", "summary_markdown"],
+        "description": "Indicates whether the summary was read from an existing session artifact or from the caller-supplied 'summary_markdown'."
+      }
+    },
+    "required": ["session_id", "mindmap", "format", "source"]
+  },
+  "notes": [
+    "The LLM prompt in config.yaml instructs the model to produce jsMind JSON (not Mermaid). The output_format parameter is reserved for future extensibility.",
+    "When the summary is shorter than config.yaml mindmap.min_token, the pipeline returns a structured 'insufficient_input' jsMind JSON. The skill parses and returns this normally.",
+    "When summary_markdown is provided together with session_id, the supplied markdown overwrites the existing summary.md in that session.",
+    "Requires the Smart Classroom runtime environment (LLM model, config.yaml, runtime_config.yaml).",
+    "The PYTHONPATH / working directory must be set to education-ai-suite/smart-classroom."
+  ]
+}
