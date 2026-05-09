@@ -867,3 +867,5 @@ async def ocr_extract_text_endpoint(file: UploadFile = File(...), x_session_id: 
 
 def register_routes(app: FastAPI):
     app.include_router(router)
+    from api.openclaw_proxy import openclaw_router  # noqa: PLC0415
+    app.include_router(openclaw_router)
