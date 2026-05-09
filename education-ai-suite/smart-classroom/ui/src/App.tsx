@@ -6,6 +6,7 @@ import Body from './components/common/Body';
 import Footer from './components/Footer/Footer';
 import Modal from './components/Modals/Modal'; // Import your existing Modal
 import SettingsForm from './components/Modals/SettingsForm'; // Import your existing SettingsForm
+import OpenClawPanel from './components/OpenClaw/OpenClawPanel';
 import './App.css';
 import MetricsPoller from './components/common/MetricsPoller';
 import { getSettings, pingBackend } from './services/api';
@@ -121,6 +122,7 @@ const App: React.FC = () => {
         </Modal>,
         document.body
       )}
+      <OpenClawPanel />
     </div>
   );
 };
