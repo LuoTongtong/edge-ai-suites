@@ -1,173 +1,231 @@
-# Smart Classroom OpenClaw Skills
+# Smart Classroom — OpenClaw Skills
 
-This directory contains [OpenClaw](https://github.com/open-edge-platform/openclaw)-callable skill adapters for the **Smart Classroom** application.
+This package exposes Smart Classroom capabilities as OpenClaw-callable skills.
+The skill adapters invoke the existing `Pipeline` directly — no running FastAPI
+server is required.
 
-## Available Skills
+---
 
-| Skill | Module | Description |
+## Directory structure
+
+```
+education-ai-suite/smart-classroom/
+└── openclaw_skills/
+    ├── __init__.py            # Package entry point
+    ├── audio_summary.py       # Audio summary skill adapter
+    ├── skill_manifest.json    # OpenClaw skill schema / metadata
+    ├── README.md              # This file
+    ├── mindmap/
+    │   ├── __init__.py
+    │   ├── skill.py           # MindMap skill adapter
+    │   └── manifest.json      # MindMap skill schema / metadata
+    └── tests/
+        ├── __init__.py
+        ├── test_audio_summary.py    # Audio summary unit tests (no real models)
+        └── test_mindmap_skill.py    # MindMap unit tests (no real models)
+```
+
+---
+
+## Available skills
+
+| Skill | Entry point | Description |
 |---|---|---|
-| `smart_classroom_audio_summary` | `openclaw_skills.audio_summary.skill` | Transcribe classroom audio → generate Markdown summary |
-| `smart_classroom_mindmap` | `openclaw_skills.mindmap.skill` | Generate a jsMind-compatible JSON mind map from a classroom summary |
+| `smart_classroom_audio_summary` | `openclaw_skills.audio_summary.run_audio_summary` | Transcribe audio → generate Markdown summary |
+| `smart_classroom_mindmap` | `openclaw_skills.mindmap.skill.run` | Generate jsMind JSON mind map from a classroom summary |
 
 ---
 
 ## Prerequisites
 
-Both skills reuse the existing Smart Classroom pipeline components (ASR, LLM summarizer, MindmapComponent).  
-The OpenClaw runtime environment must satisfy:
+| Requirement | Notes |
+|---|---|
+| Python ≥ 3.9 | Match the environment used by Smart Classroom |
+| `ffmpeg` on PATH | Required by the audio chunking component |
+| Smart Classroom dependencies installed | `pip install -r requirements.txt` from the `smart-classroom` directory |
+| `config.yaml` and `runtime_config.yaml` present | Controls model selection, storage paths, etc. |
+| ASR and LLM models available | As configured in `config.yaml` |
 
-1. Python path / working directory set to `education-ai-suite/smart-classroom`
-2. Dependencies installed: `pip install -r requirements.txt`
-3. `config.yaml` and `runtime_config.yaml` present and configured
-4. The ASR model and LLM summarizer model available as configured in `config.yaml`
+### Working directory
+
+Both skills **must** be invoked with the working directory set to
+`education-ai-suite/smart-classroom/` so that relative imports and config
+file discovery work correctly.
+
+```bash
+cd education-ai-suite/smart-classroom
+```
 
 ---
 
 ## Skill: `smart_classroom_audio_summary`
 
-Transcribes a classroom audio file and generates a structured Markdown summary.
+Transcribes classroom audio and generates a structured Markdown summary.
 
-### Registration (conceptual)
+### Quick start
 
-```yaml
-skills:
-  - name: smart_classroom_audio_summary
-    type: python
-    module: openclaw_skills.audio_summary.skill
-    entrypoint: run
-    working_dir: /path/to/edge-ai-suites/education-ai-suite/smart-classroom
+```python
+from openclaw_skills.audio_summary import run_audio_summary
+
+result = run_audio_summary(audio_file="/path/to/lecture.wav")
+
+print(result["session_id"])        # e.g. "20240101-120000-ab12"
+print(result["summary_markdown"])  # full Markdown summary
+print(result["transcript"])        # full transcript text
 ```
 
-### Input
+### Using a pre-staged audio file
+
+```python
+result = run_audio_summary(audio_filename="lecture.wav")
+```
+
+The skill resolves the file against the configured project storage directory
+(`{Project.location}/{Project.name}/audio/{audio_filename}`).
+
+### Reusing an existing session
+
+```python
+result = run_audio_summary(
+    audio_file="/path/to/lecture.wav",
+    session_id="20240101-120000-ab12",
+)
+```
+
+### OpenClaw invocation
+
+Register the skill in OpenClaw using the metadata from `skill_manifest.json`:
 
 ```json
 {
-  "audio_file": "/absolute/path/to/lecture.mp3",
-  "source_type": "audio_file",
-  "include_transcript": true
+  "skill": "smart_classroom_audio_summary",
+  "input": {
+    "audio_file": "/data/classroom/lecture.wav"
+  }
 }
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `audio_file` | string | one of `audio_file`/`audio_filename` | Absolute path to the audio file |
-| `audio_filename` | string | one of `audio_file`/`audio_filename` | Filename already in the upload directory |
-| `session_id` | string | no | Reuse an existing Smart Classroom session |
-| `source_type` | string | no | `"audio_file"` (default) or `"microphone"` |
-| `include_transcript` | bool | no | Include full transcript in output (default `true`) |
+### Input schema
 
-### Output
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `audio_file` | string | one of | — | Full path to an audio file |
+| `audio_filename` | string | one of | — | Pre-staged filename (relative to project storage) |
+| `session_id` | string | no | auto-generated | Reuse an existing session |
+| `source_type` | string | no | `"audio_file"` | Only `"audio_file"` is supported |
+| `include_transcript` | boolean | no | `true` | Include transcript text in output |
 
-```json
-{
-  "session_id": "20260509-143022-ab12",
-  "summary_markdown": "## Teacher Summary\n- ...\n\n## Key Takeaways\n- ...",
-  "transcript": "TEACHER: Today we'll cover quantum mechanics ...",
-  "source": "audio_file"
-}
-```
+At least one of `audio_file` or `audio_filename` must be provided.
+
+### Output schema
+
+| Field | Type | Description |
+|---|---|---|
+| `session_id` | string | Session id used for this run |
+| `summary_markdown` | string | Full generated summary (Markdown) |
+| `transcript` | string \| null | Full transcript (when `include_transcript=true`) |
+| `transcription_events` | array | Raw chunk-level events from the pipeline |
 
 ---
 
 ## Skill: `smart_classroom_mindmap`
 
-Generates a jsMind-compatible JSON mind map from a classroom summary.
+Generates a jsMind-compatible JSON mind map from a classroom summary. Accepts either
+an existing `session_id` (reads `summary.md` from the session directory) or a
+`summary_markdown` string supplied directly (e.g. the output of
+`smart_classroom_audio_summary`).
 
 > **Format note:** The LLM prompt in `config.yaml` instructs the model to produce
 > **jsMind JSON** (with `meta`, `format`, and `data` fields), not Mermaid.
-> The `output_format` parameter is `"jsmind_json"` by default and is exposed for
-> future extensibility.
+> `output_format` defaults to `"jsmind_json"`.
 
-### Registration (conceptual)
+### Quick start
 
-```yaml
-skills:
-  - name: smart_classroom_mindmap
-    type: python
-    module: openclaw_skills.mindmap.skill
-    entrypoint: run
-    working_dir: /path/to/edge-ai-suites/education-ai-suite/smart-classroom
+```python
+from openclaw_skills.mindmap.skill import run as run_mindmap
+
+result = run_mindmap({
+    "session_id": "20240101-120000-ab12",
+    "summary_markdown": "## Teacher Summary\n- Wave-particle duality ...",
+    "output_format": "jsmind_json",
+})
+
+print(result["mindmap"])      # parsed jsMind JSON dict
+print(result["format"])       # "jsmind_json"
+print(result["source"])       # "summary_markdown"
 ```
 
-### Input
+### OpenClaw invocation
 
 ```json
 {
-  "session_id": "20260509-143022-ab12",
-  "summary_markdown": "## Teacher Summary\n- ...",
-  "output_format": "jsmind_json",
-  "include_raw": false
+  "skill": "smart_classroom_mindmap",
+  "input": {
+    "session_id": "20260509-143022-ab12",
+    "summary_markdown": "## Teacher Summary\n- ...",
+    "output_format": "jsmind_json"
+  }
 }
 ```
 
+### Input schema
+
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `session_id` | string | one of `session_id`/`summary_markdown` | Existing session ID |
-| `summary_markdown` | string | one of `session_id`/`summary_markdown` | Markdown summary text |
+| `session_id` | string | one of | Existing session ID |
+| `summary_markdown` | string | one of | Markdown summary text |
 | `language` | string | no | `"en"` (default) or `"zh"` |
 | `output_format` | string | no | `"jsmind_json"` (default) or `"raw"` |
 | `include_raw` | bool | no | Also return raw LLM string (default `false`) |
 
-### Output
+At least one of `session_id` or `summary_markdown` must be provided.
 
-```json
-{
-  "session_id": "20260509-143022-ab12",
-  "mindmap": {
-    "meta": {"name": "Quantum Mechanics", "author": "ai_assistant", "version": "1.0"},
-    "format": "node_tree",
-    "data": {
-      "id": "root",
-      "topic": "Quantum Mechanics",
-      "children": [...]
-    }
-  },
-  "format": "jsmind_json",
-  "source": "summary_markdown"
-}
-```
+### Output schema
 
 | Field | Type | Description |
 |---|---|---|
 | `session_id` | string | Session used / created for this request |
 | `mindmap` | object \| null | Parsed jsMind JSON; `null` when parsing failed |
 | `raw_mindmap` | string | Raw LLM output (present when `include_raw=true` or parsing failed) |
-| `format` | string | `"jsmind_json"` or `"raw"` (actual format of `mindmap`) |
+| `format` | string | `"jsmind_json"` or `"raw"` |
 | `source` | string | `"session_id"` or `"summary_markdown"` |
 
 ---
 
-## Chaining Audio Summary → MindMap
+## Chaining: Audio Summary → MindMap
 
-The two skills are designed to chain: the output of `smart_classroom_audio_summary`
-feeds directly into `smart_classroom_mindmap`.
+The two skills are designed to chain: pass `session_id` and `summary_markdown`
+from the audio summary output directly into the mindmap skill.
 
-### Step 1 – Audio Summary
+### Python
+
+```python
+from openclaw_skills.audio_summary import run_audio_summary
+from openclaw_skills.mindmap.skill import run as run_mindmap
+
+# Step 1 — transcribe and summarise
+audio_result = run_audio_summary(audio_file="/data/classes/physics_lecture.mp3")
+# → {"session_id": "20260509-...", "summary_markdown": "## Teacher Summary\n..."}
+
+# Step 2 — generate mind map (pass both fields directly)
+mindmap_result = run_mindmap({
+    "session_id":       audio_result["session_id"],
+    "summary_markdown": audio_result["summary_markdown"],
+    "output_format":    "jsmind_json",
+})
+# → {"mindmap": {"meta": {...}, "format": "node_tree", "data": {...}}, ...}
+```
+
+### OpenClaw orchestration
 
 ```json
 {
   "skill": "smart_classroom_audio_summary",
-  "input": {
-    "audio_file": "/data/classes/physics_lecture.mp3",
-    "include_transcript": true
-  }
+  "input": {"audio_file": "/data/classes/physics_lecture.mp3", "include_transcript": true}
 }
 ```
 
-Response:
-
-```json
-{
-  "session_id": "20260509-143022-ab12",
-  "summary_markdown": "## Teacher Summary\n- Wave-particle duality ...",
-  "transcript": "TEACHER: Today we cover ...",
-  "source": "audio_file"
-}
-```
-
-### Step 2 – MindMap (using output from Step 1)
-
-Pass `summary_markdown` and `session_id` from Step 1 directly:
+Then pass `summary_markdown` and `session_id` into:
 
 ```json
 {
@@ -180,72 +238,55 @@ Pass `summary_markdown` and `session_id` from Step 1 directly:
 }
 ```
 
-Response:
-
-```json
-{
-  "session_id": "20260509-143022-ab12",
-  "mindmap": {
-    "meta": {"name": "physics_lecture", "author": "ai_assistant", "version": "1.0"},
-    "format": "node_tree",
-    "data": {
-      "id": "root",
-      "topic": "Quantum Mechanics and Wave Theory",
-      "children": [
-        {
-          "id": "wave_particle_duality",
-          "topic": "Wave-Particle Duality",
-          "children": [...]
-        }
-      ]
-    }
-  },
-  "format": "jsmind_json",
-  "source": "summary_markdown"
-}
-```
-
-### OpenClaw orchestration example
-
-```python
-audio_result = openclaw.invoke("smart_classroom_audio_summary", {
-    "audio_file": "/data/classes/physics_lecture.mp3",
-    "include_transcript": True,
-})
-
-mindmap_result = openclaw.invoke("smart_classroom_mindmap", {
-    "session_id":       audio_result["session_id"],
-    "summary_markdown": audio_result["summary_markdown"],
-    "output_format":    "jsmind_json",
-})
-```
-
 ---
 
-## Behavior Notes
+## Behavior notes
 
 - **Minimum token check:** `Pipeline.run_mindmap()` enforces `mindmap.min_token` from
-  `config.yaml` (default: 20 tokens). If the summary is too short, the pipeline
-  returns an `insufficient_input` jsMind JSON structure. The skill parses and returns
-  this normally with `format: "jsmind_json"`.
+  `config.yaml` (default: 20 tokens). Short summaries return an `insufficient_input`
+  jsMind JSON structure; the skill parses and returns it normally.
 
-- **summary_markdown overwrites session summary:** When both `session_id` and
+- **`summary_markdown` overwrites session summary:** When both `session_id` and
   `summary_markdown` are provided, the supplied markdown is written to that session's
-  `summary.md` before running the pipeline. This lets you regenerate a mind map from
-  updated content without creating a new session.
+  `summary.md` before running the pipeline, allowing regeneration without a new session.
 
 - **JSON parsing:** The skill strips markdown code fences before attempting to parse
-  the LLM output as JSON. If parsing fails, `mindmap` is `null`, `raw_mindmap` is
-  always included, and `format` is set to `"raw"`.
+  the LLM output as JSON. On failure, `mindmap` is `null`, `raw_mindmap` is included,
+  and `format` is `"raw"`.
 
 ---
 
-## Tests
+## Error handling
 
-Lightweight pytest unit tests (no ASR/LLM model loading) are in
-`openclaw_skills/tests/`:
+| Exception | Cause |
+|---|---|
+| `AudioSummaryInputError` | Missing/invalid input for audio summary (no audio, file not found) |
+| `ValueError` | Missing/invalid input for mindmap skill |
+| `RuntimeError` | Pipeline init, transcription, or summarisation failure |
+
+---
+
+## Artifacts written to disk
+
+The pipeline writes the following files under
+`{Project.location}/{Project.name}/{session_id}/`:
+
+| File | Description |
+|---|---|
+| `transcription.txt` | Full transcript (speaker-labelled lines) |
+| `summary.md` | Generated Markdown summary |
+| `mindmap.mmd` | Generated jsMind JSON mind map |
+| `performance_metrics.csv` | Timing / throughput metrics |
+
+---
+
+## Running the tests
 
 ```bash
+# From the smart-classroom directory:
 cd education-ai-suite/smart-classroom
 python -m pytest openclaw_skills/tests/ -v
 ```
+
+The tests use `unittest.mock` to patch `Pipeline` and config utilities so
+**no real ASR or LLM models are loaded**.
